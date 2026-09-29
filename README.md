@@ -1,6 +1,7 @@
 # Calendar · Vanilla JS + MongoDB Atlas
 
 Misma UI. Eventos en Atlas (`gcal.events`).
+Servicio Cloud Run: `googlecalendar-vanilla`.
 
 ## Local
 
@@ -17,7 +18,8 @@ Sin `MONGODB_URI` usa `/tmp`.
 export GCP_PROJECT_ID=project-778283d9-dc7e-4c2c-947
 export MONGODB_URI="mongodb+srv://USER:PASS@CLUSTER.mongodb.net/gcal?retryWrites=true&w=majority&authSource=admin"
 
-gcloud run deploy gcal-vanilla \
+gcloud run deploy googlecalendar-vanilla \
+  --project $GCP_PROJECT_ID \
   --source . \
   --region europe-west1 \
   --allow-unauthenticated \
