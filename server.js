@@ -8,6 +8,9 @@ const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, "public");
 const SEED = path.join(ROOT, "data", "events.json");
 const LOCAL_DB = process.env.DB_PATH || path.join("/tmp", "gcal-events.json");
+const MONGO_URI = process.env.MONGODB_URI || "";
+const MONGO_DB = process.env.MONGODB_DB || "gcal";
+const MONGO_COL = process.env.MONGODB_COLLECTION || "events";
 
 const TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -24,16 +27,40 @@ function seedEvents() {
   }
 }
 
-function read() {
+let colPromise = null;
+
+async function collection() {
+  if (!MONGO_URI) return null;
+  if (!colPromise) {
+    colPromise = (async () => {
+      const { MongoClient } = require("mongodb");
+      const client = new MongoClient(MONGO_URI);
+      await client.connect();
+      const col = client.db(MONGO_DB).collection(MONGO_COL);
+      if ((await col.countDocuments()) === 0) {
+        const seed = seedEvents();
+        if (seed.length) await col.insertMany(seed);
+      }
+      return col;
+    })();
+  }
+  return colPromise;
+}
+
+function publicEvent(doc) {
+  return { id: doc.id, title: doc.title, date: doc.date };
+}
+
+function localRead() {
   try {
     if (fs.existsSync(LOCAL_DB)) return JSON.parse(fs.readFileSync(LOCAL_DB, "utf8"));
   } catch {}
   const seed = seedEvents();
-  write(seed);
+  localWrite(seed);
   return seed;
 }
 
-function write(rows) {
+function localWrite(rows) {
   fs.writeFileSync(LOCAL_DB, JSON.stringify(rows, null, 2));
 }
 
@@ -68,15 +95,19 @@ function file(res, filePath) {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://localhost");
+    const col = await collection();
 
     if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/healthz")) {
-      return send(res, 200, { ok: true, store: "local" });
+      return send(res, 200, { ok: true, store: col ? "mongodb" : "local" });
     }
 
     if (req.method === "GET" && url.pathname === "/api/events") {
       const month = url.searchParams.get("month");
-      const rows = read().filter((e) => !month || String(e.date).startsWith(month));
-      return send(res, 200, rows);
+      const rows = col
+        ? (await col.find({}, { projection: { _id: 0 } }).toArray()).map(publicEvent)
+        : localRead();
+      const filtered = rows.filter((e) => !month || String(e.date).startsWith(month));
+      return send(res, 200, filtered);
     }
 
     if (req.method === "POST" && url.pathname === "/api/events") {
@@ -85,18 +116,26 @@ const server = http.createServer(async (req, res) => {
       const date = String(data.date || "");
       if (!title || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return send(res, 400, { error: "datos" });
       const ev = { id: "e" + Date.now(), title, date };
-      const rows = read();
-      rows.push(ev);
-      write(rows);
+      if (col) await col.insertOne({ ...ev });
+      else {
+        const rows = localRead();
+        rows.push(ev);
+        localWrite(rows);
+      }
       return send(res, 201, ev);
     }
 
     const del = url.pathname.match(/^\/api\/events\/([^/]+)$/);
     if (req.method === "DELETE" && del) {
-      const rows = read();
-      const next = rows.filter((e) => e.id !== del[1]);
+      const id = del[1];
+      if (col) {
+        const out = await col.deleteOne({ id });
+        return out.deletedCount ? send(res, 200, { ok: true }) : send(res, 404, { error: "no" });
+      }
+      const rows = localRead();
+      const next = rows.filter((e) => e.id !== id);
       if (next.length === rows.length) return send(res, 404, { error: "no" });
-      write(next);
+      localWrite(next);
       return send(res, 200, { ok: true });
     }
 
@@ -110,5 +149,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`listening on http://${HOST}:${PORT}`);
+  console.log(`listening on http://${HOST}:${PORT} store=${MONGO_URI ? "mongodb" : "local"}`);
 });

@@ -1,25 +1,30 @@
-# Calendar · Vanilla JS + Cloud Run
+# Calendar · Vanilla JS + MongoDB Atlas
 
-Mes tipo Google Calendar. Alta y baja de eventos. Node `http` nativo.
+Misma UI. Eventos en Atlas (`gcal.events`).
 
 ## Local
 
 ```bash
+npm install
 npm start
 ```
 
-http://localhost:8080
+Sin `MONGODB_URI` usa `/tmp`.
 
 ## Cloud Run
 
 ```bash
+export GCP_PROJECT_ID=project-778283d9-dc7e-4c2c-947
+export MONGODB_URI="mongodb+srv://USER:PASS@CLUSTER.mongodb.net/gcal?retryWrites=true&w=majority&authSource=admin"
+
 gcloud run deploy gcal-vanilla \
   --source . \
   --region europe-west1 \
-  --allow-unauthenticated
+  --allow-unauthenticated \
+  --update-env-vars="MONGODB_URI=${MONGODB_URI},MONGODB_DB=gcal,MONGODB_COLLECTION=events"
 ```
 
-Usa `PORT` y escucha en `0.0.0.0`. Los eventos se guardan en `/tmp` (se pierden al apagar la instancia).
+`/health` tiene que decir `"store":"mongodb"`.
 
 ## API
 
